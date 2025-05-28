@@ -1,0 +1,23 @@
+{
+  "name": "wordpress-ai-search-agent",
+  "version": "1.0.0",
+  "description": "AI agent for searching Burmese text from WordPress SQL database using OpenAI API",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node src/test.js"
+  },
+  "keywords": ["ai", "search", "wordpress", "burmese", "myanmar", "openai"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "mysql2": "^3.6.5",
+    "openai": "^4.28.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
