@@ -117,24 +117,43 @@ class SearchEngine {
     keywordSearch(query) {
         const results = [];
         const queryVariants = this.burmeseProcessor.createSearchVariants(query);
+        const queryTokens = this.burmeseProcessor.tokenize(query);
 
-        for (const [postId, data] of this.embeddings) {
+        for (const [, data] of this.embeddings) {
             let keywordScore = 0;
             const { post, searchableText } = data;
+            const contentTokens = this.burmeseProcessor.tokenize(searchableText);
 
             queryVariants.forEach(variant => {
                 const similarity = this.burmeseProcessor.calculateSimilarity(searchableText, variant);
                 keywordScore = Math.max(keywordScore, similarity);
 
-                if (searchableText.toLowerCase().includes(variant.toLowerCase())) {
-                    keywordScore += 0.5;
+                if (this.burmeseProcessor.isBurmese(variant)) {
+                    const exactMatch = searchableText.includes(variant);
+                    if (exactMatch) keywordScore += 0.8;
+                    
+                    const fuzzyMatches = this.findFuzzyMatches(variant, contentTokens);
+                    if (fuzzyMatches > 0) keywordScore += (fuzzyMatches * 0.3);
+                } else {
+                    if (searchableText.toLowerCase().includes(variant.toLowerCase())) {
+                        keywordScore += 0.5;
+                    }
                 }
             });
 
-            if (keywordScore > 0) {
+            queryTokens.forEach(qToken => {
+                contentTokens.forEach(cToken => {
+                    const tokenSimilarity = this.burmeseProcessor.calculateSimilarity(qToken, cToken);
+                    if (tokenSimilarity > 0.7) {
+                        keywordScore += (tokenSimilarity * 0.4);
+                    }
+                });
+            });
+
+            if (keywordScore > 0.1) {
                 results.push({
                     post,
-                    keywordScore,
+                    keywordScore: Math.min(keywordScore, 2.0),
                     searchableText
                 });
             }
@@ -143,12 +162,28 @@ class SearchEngine {
         return results.sort((a, b) => b.keywordScore - a.keywordScore);
     }
 
+    findFuzzyMatches(query, tokens) {
+        let matches = 0;
+        const queryLength = query.length;
+        
+        tokens.forEach(token => {
+            if (token.length >= queryLength - 1 && token.length <= queryLength + 1) {
+                const similarity = this.burmeseProcessor.calculateSimilarity(query, token);
+                if (similarity > 0.6) {
+                    matches++;
+                }
+            }
+        });
+        
+        return matches;
+    }
+
     async semanticSearch(query, threshold = 0.7) {
         try {
             const queryEmbedding = await this.openai.generateEmbedding(query);
             const results = [];
 
-            for (const [postId, data] of this.embeddings) {
+            for (const [, data] of this.embeddings) {
                 const similarity = this.openai.calculateCosineSimilarity(
                     queryEmbedding, 
                     data.embedding

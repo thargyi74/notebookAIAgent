@@ -10,6 +10,7 @@ async function testBurmeseTextProcessor() {
         'မြန်မာနိုင်ငံ',
         'ရန်ကုန်မြို့',
         'မန္တလေးတိုင်း',
+        'ကိုဗစ်ကာကွယ်ဆေး မထိုးခင် ဒါအရင် ဖတ်သွားပါ',
         'နေပြည်တော်'
     ];
     
@@ -38,6 +39,7 @@ async function testSearchFunctionality() {
         const testQueries = [
             'မြန်မာ',
             'technology',
+            'ကိုဗစ်ကာကွယ်ဆေး မထိုးခင် ဒါအရင် ဖတ်သွားပါ',
             'ပညာရေး'
         ];
         
