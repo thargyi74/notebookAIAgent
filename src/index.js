@@ -1,4 +1,5 @@
 import AISearchAgent from './ai-search-agent.js';
+import readline from 'readline';
 
 async function main() {
     try {
@@ -14,14 +15,32 @@ async function main() {
         
         await agent.initialize();
         
-        const searchQueries = [
-            'မြန်မာ',
-            'ရန်ကုန်',
-            'နေပြည်တော်',
-            'technology'
-        ];
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
 
-        for (const query of searchQueries) {
+        const askQuestion = (question) => {
+            return new Promise((resolve) => {
+                rl.question(question, resolve);
+            });
+        };
+
+        console.log('\nAI Search Agent is ready!');
+        console.log('Enter your search queries (type "exit" to quit):');
+
+        while (true) {
+            const query = await askQuestion('\nSearch: ');
+            
+            if (query.toLowerCase() === 'exit') {
+                break;
+            }
+            
+            if (!query.trim()) {
+                console.log('Please enter a search query.');
+                continue;
+            }
+
             console.log(`\n${'='.repeat(50)}`);
             console.log(`Search Query: "${query}"`);
             console.log(`${'='.repeat(50)}`);
@@ -46,6 +65,8 @@ async function main() {
                 console.error(`Search failed for "${query}":`, error.message);
             }
         }
+
+        rl.close();
 
         console.log('\n' + '='.repeat(50));
         console.log('Agent Statistics:');
