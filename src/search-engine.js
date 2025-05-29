@@ -12,17 +12,28 @@ class SearchEngine {
         console.log(`Indexing ${posts.length} posts...`);
         
         const contentTexts = posts.map(post => {
-            const searchableText = `${post.post_title} ${post.post_content} ${post.post_excerpt || ''}`;
+            // Truncate content to prevent token overflow - keep titles and excerpts full
+            const truncatedContent = this.truncateContent(post.post_content || '', 500);
+            const searchableText = `${post.post_title} ${truncatedContent} ${post.post_excerpt || ''}`;
             return this.burmeseProcessor.normalizeText(searchableText);
         });
 
         try {
-            const embeddings = await this.openai.generateMultipleEmbeddings(contentTexts);
+            const chunkSize = 5; // Process 5 posts at a time to stay within token limits
+            const allEmbeddings = [];
+            
+            for (let i = 0; i < contentTexts.length; i += chunkSize) {
+                const chunk = contentTexts.slice(i, i + chunkSize);
+                console.log(`Processing batch ${Math.floor(i/chunkSize) + 1}/${Math.ceil(contentTexts.length/chunkSize)}`);
+                
+                const chunkEmbeddings = await this.openai.generateMultipleEmbeddings(chunk);
+                allEmbeddings.push(...chunkEmbeddings);
+            }
             
             posts.forEach((post, index) => {
                 this.embeddings.set(post.ID, {
                     post,
-                    embedding: embeddings[index],
+                    embedding: allEmbeddings[index],
                     searchableText: contentTexts[index]
                 });
             });
