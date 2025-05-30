@@ -7,6 +7,7 @@ An intelligent search agent for WordPress databases with advanced Burmese (Myanm
 - **Hybrid Search**: Combines keyword matching with semantic similarity using OpenAI embeddings
 - **Burmese Language Support**: Advanced text normalization, tokenization, and synonym expansion for Myanmar language
 - **WordPress Integration**: Direct connection to WordPress MySQL database
+- **ElasticPress Integration**: Search from es_backup index with multi-table support
 - **Semantic Understanding**: Uses OpenAI's text-embedding-3-small model for contextual search
 - **Query Enhancement**: Automatic expansion of search terms using AI
 - **Content Summarization**: AI-powered summaries for long content
@@ -41,14 +42,56 @@ DB_PORT=3306
 DB_NAME=wordpress_database_name
 DB_USER=your_database_username
 DB_PASSWORD=your_database_password
+TABLE_PREFIX=wp_
 
-# Optional: WordPress URL for generating post links
-WORDPRESS_BASE_URL=http://localhost/wordpress
+# Elasticsearch Configuration
+ELASTICSEARCH_URL=http://localhost:9200
+ELASTICSEARCH_USERNAME=elastic
+ELASTICSEARCH_PASSWORD=changeme
+ES_BACKUP_INDEX=es_backup
+
+# Search Configuration
+SEARCH_LIMIT=30
+SIMILARITY_THRESHOLD=0.7
 ```
 
 ## Usage
 
-### Basic Usage
+### ElasticPress Search (New!)
+
+Search from es_backup index with multi-table support:
+
+```bash
+# Interactive Elasticsearch search demo
+npm run elasticsearch
+```
+
+**Search Commands:**
+- `your query` - Search all tables
+- `table:posts your query` - Search specific table  
+- `tables` - List available tables
+- `exit` - Quit
+
+**Programmatic Usage:**
+```javascript
+import ElasticsearchSearchEngine from './src/elasticsearch-search.js';
+
+const searchEngine = new ElasticsearchSearchEngine();
+
+// Initialize and import WordPress data to es_backup
+await searchEngine.initializeBackup();
+
+// Search all tables
+const results = await searchEngine.search('မြန်မာ နည်းပညာ');
+
+// Search specific table
+const postsResults = await searchEngine.searchSpecificTable('technology', 'posts');
+
+// Get available tables
+const tables = await searchEngine.getAvailableTables();
+```
+
+### Basic AI Search
 
 ```javascript
 import AISearchAgent from './src/ai-search-agent.js';
@@ -96,6 +139,37 @@ const results = await agent.search('search query', {
 ```
 
 ## API Reference
+
+### ElasticsearchSearchEngine
+
+#### Methods
+
+##### `initializeBackup()`
+Initialize es_backup index and import WordPress data from all tables.
+
+##### `search(query, options)`
+Search across all tables in es_backup index.
+
+**Parameters:**
+- `query` (string): Search query
+- `options` (object): Search options
+  - `tables` (array): Specific tables to search
+  - `limit` (number): Maximum results per table
+  - `offset` (number): Result offset for pagination
+  - `sortBy` (string): Sort field (default: '_score')
+  - `sortOrder` (string): Sort order ('asc' or 'desc')
+
+##### `searchSpecificTable(query, tableName, options)`
+Search within a specific WordPress table.
+
+##### `searchMultipleTables(query, tableNames, options)`
+Search across multiple specified tables.
+
+##### `getAvailableTables()`
+Get list of available tables in es_backup with document counts.
+
+##### `displayResults(searchResults)`
+Format and display search results grouped by table.
 
 ### AISearchAgent
 
@@ -188,20 +262,44 @@ The agent includes comprehensive error handling for:
 
 ## Development
 
-### Run Tests
-```bash
-npm test
-```
+### Available Scripts
 
-### Run Example
 ```bash
+# Run AI search agent
 npm start
+
+# Development mode with auto-reload
+npm run dev
+
+# Run tests
+npm test
+
+# Run Elasticsearch search demo
+npm run elasticsearch
 ```
 
-### Development Mode
-```bash
-npm run dev
-```
+### Prerequisites
+
+**For Elasticsearch Integration:**
+1. Install and run Elasticsearch:
+   ```bash
+   # Using Docker
+   docker run -d --name elasticsearch \
+     -p 9200:9200 -p 9300:9300 \
+     -e "discovery.type=single-node" \
+     -e "xpack.security.enabled=false" \
+     elasticsearch:8.11.0
+   ```
+
+2. Verify Elasticsearch is running:
+   ```bash
+   curl http://localhost:9200
+   ```
+
+**Database Setup:**
+- Ensure WordPress database is accessible
+- Configure proper table prefix in `.env`
+- Test connection with: `node test-db-connection.js`
 
 ## Contributing
 

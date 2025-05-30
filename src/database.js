@@ -126,6 +126,54 @@ class WordPressDatabase {
       return false;
     }
   }
+
+  async getAllTablesData() {
+    if (!this.connection) {
+      await this.connect();
+    }
+
+    const tables = ['posts', 'postmeta', 'terms', 'term_taxonomy', 'term_relationships', 'options'];
+    const allData = {};
+
+    for (const table of tables) {
+      try {
+        const tableName = `${this.tablePrefix}${table}`;
+        const [rows] = await this.connection.execute(`SELECT * FROM ${tableName} LIMIT 1000`);
+        allData[table] = rows.map(row => ({
+          ...row,
+          source_table: table
+        }));
+      } catch (error) {
+        console.error(`Error fetching data from ${table}:`, error.message);
+        allData[table] = [];
+      }
+    }
+
+    return allData;
+  }
+
+  async getTableData(tableName, limit = 1000) {
+    if (!this.connection) {
+      await this.connect();
+    }
+
+    try {
+      const fullTableName = `${this.tablePrefix}${tableName}`;
+      const limitInt = Math.max(1, parseInt(limit, 10) || 1000);
+      
+      const [rows] = await this.connection.execute(
+        `SELECT * FROM ${fullTableName} LIMIT ${limitInt}`
+      );
+      
+      return rows.map(row => ({
+        ...row,
+        source_table: tableName
+      }));
+    } catch (error) {
+      console.error(`Error fetching data from ${tableName}:`, error.message);
+      throw error;
+    }
+  }
 }
 
 export default WordPressDatabase;

@@ -7,15 +7,24 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node src/test.js"
+    "test": "node src/test.js",
+    "elasticsearch": "node src/elasticsearch-demo.js"
   },
-  "keywords": ["ai", "search", "wordpress", "burmese", "myanmar", "openai"],
+  "keywords": [
+    "ai",
+    "search",
+    "wordpress",
+    "burmese",
+    "myanmar",
+    "openai"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@elastic/elasticsearch": "^9.0.2",
+    "dotenv": "^16.3.1",
     "mysql2": "^3.6.5",
-    "openai": "^4.28.0",
-    "dotenv": "^16.3.1"
+    "openai": "^4.28.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
