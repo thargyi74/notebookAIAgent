@@ -1,204 +1,41 @@
 import { Client } from '@elastic/elasticsearch';
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 class ElasticsearchClient {
-  constructor() {
-    const baseUrl = process.env.ELASTICSEARCH_URL || "http://localhost:9200";
-
-    const config = {
-      node: baseUrl,
-    };
-
-    // Only add auth if credentials are provided
-    if (
-      process.env.ELASTICSEARCH_USERNAME &&
-      process.env.ELASTICSEARCH_PASSWORD
-    ) {
-      config.auth = {
-        username: process.env.ELASTICSEARCH_USERNAME,
-        password: process.env.ELASTICSEARCH_PASSWORD,
-      };
-    }
-
-    this.client = new Client(config);
-  }
-
-  async searchFromBackup(query, options = {}) {
-    const {
-      size = 10,
-      from = 0,
-      fields = ["*"],
-      filters = {},
-      sort = [{ _score: { order: "desc" } }],
-    } = options;
-
-    try {
-      const searchBody = {
-        query: {
-          bool: {
-            must: [
-              {
-                multi_match: {
-                  query: query,
-                  fields: [
-                    "title^3",
-                    "content^2",
-                    "excerpt",
-                    "meta_value",
-                    "term_name",
-                    "description",
-                  ],
-                  type: "best_fields",
-                  operator: "or",
-                },
-              },
-            ],
-            filter: [],
-          },
-        },
-        size,
-        from,
-        sort,
-        _source: fields,
-        highlight: {
-          fields: {
-            title: {},
-            content: {},
-            excerpt: {},
-          },
-          pre_tags: ["<mark>"],
-          post_tags: ["</mark>"],
-        },
-      };
-
-      // Add filters if provided
-      Object.entries(filters).forEach(([field, value]) => {
-        searchBody.query.bool.filter.push({
-          term: { [field]: value },
-        });
-      });
-
-      const response = await this.client.search({
-        index: this.backupIndex,
-        body: searchBody,
-      });
-
-      return {
-        total: response.body.hits.total.value,
-        hits: response.body.hits.hits.map((hit) => ({
-          id: hit._id,
-          source: hit._source,
-          score: hit._score,
-          highlight: hit.highlight || {},
-          table: hit._source.source_table || "unknown",
-        })),
-      };
-    } catch (error) {
-      console.error("Elasticsearch search failed:", error.message);
-      throw error;
-    }
-  }
-
-  async searchByTable(query, tableName, options = {}) {
-    const tableFilters = { source_table: tableName };
-    return this.searchFromBackup(query, {
-      ...options,
-      filters: { ...options.filters, ...tableFilters },
+  constructor(host = null, port = 80, protocol = 'http') {
+    this.host = host || process.env.ELASTICSEARCH_HOST || 'localhost';
+    this.port = port || process.env.ELASTICSEARCH_PORT || 9200;
+    this.protocol = protocol || process.env.ELASTICSEARCH_PROTOCOL || 'http';
+    this.indexName = process.env.ELASTICSEARCH_INDEX || process.env.ES_BACKUP_INDEX || 'es_backup';
+    
+    this.client = new Client({
+      node: `${this.protocol}://${this.host}:${this.port}`,
+      requestTimeout: 60000,
+      pingTimeout: 3000,
+      auth: this.getAuthConfig()
     });
   }
 
-  async getAvailableTables() {
-    try {
-      const response = await this.client.search({
-        index: this.backupIndex,
-        body: {
-          size: 0,
-          aggs: {
-            tables: {
-              terms: {
-                field: "source_table.keyword",
-                size: 100,
-              },
-            },
-          },
-        },
-      });
-
-      return response.body.aggregations.tables.buckets.map((bucket) => ({
-        table: bucket.key,
-        count: bucket.doc_count,
-      }));
-    } catch (error) {
-      console.error("Failed to get available tables:", error.message);
-      throw error;
+  getAuthConfig() {
+    const username = process.env.ELASTICSEARCH_USERNAME;
+    const password = process.env.ELASTICSEARCH_PASSWORD;
+    
+    if (username && password) {
+      return { username, password };
     }
-  }
-
-  async searchMultipleTables(query, tableNames = [], options = {}) {
-    const results = {};
-
-    if (tableNames.length === 0) {
-      // Search all tables
-      const allResults = await this.searchFromBackup(query, options);
-
-      // Group by table
-      allResults.hits.forEach((hit) => {
-        const table = hit.table;
-        if (!results[table]) {
-          results[table] = [];
-        }
-        results[table].push(hit);
-      });
-    } else {
-      // Search specific tables
-      for (const tableName of tableNames) {
-        try {
-          const tableResults = await this.searchByTable(
-            query,
-            tableName,
-            options
-          );
-          results[tableName] = tableResults.hits;
-        } catch (error) {
-          console.error(`Search failed for table ${tableName}:`, error.message);
-          results[tableName] = [];
-        }
-      }
-    }
-
-    return results;
-  }
-
-  async indexData(data, id = null) {
-    try {
-      const document = {
-        ...data,
-        indexed_at: new Date().toISOString(),
-      };
-
-      const indexParams = {
-        index: this.backupIndex,
-        body: document,
-      };
-
-      if (id) {
-        indexParams.id = id;
-      }
-
-      const response = await this.client.index(indexParams);
-      return response.body;
-    } catch (error) {
-      console.error("Failed to index data:", error.message);
-      throw error;
-    }
+    return undefined;
   }
 
   async checkConnection() {
     try {
+      console.log(`Connecting to Elasticsearch at ${this.protocol}://${this.host}:${this.port}`);
       const response = await this.client.ping();
-      return response.statusCode === 200;
+      console.log('✅ Elasticsearch connection successful');
+      return true;
     } catch (error) {
-      console.error("Elasticsearch connection failed:", error.message);
+      console.error('❌ Elasticsearch connection failed:', error.message);
       return false;
     }
   }
@@ -206,34 +43,288 @@ class ElasticsearchClient {
   async createBackupIndex() {
     try {
       const indexExists = await this.client.indices.exists({
-        index: this.backupIndex,
+        index: this.indexName
       });
 
-      if (!indexExists.body) {
-        await this.client.indices.create({
-          index: this.backupIndex,
-          body: {
-            mappings: {
-              properties: {
-                title: { type: "text", analyzer: "standard" },
-                content: { type: "text", analyzer: "standard" },
-                excerpt: { type: "text", analyzer: "standard" },
-                meta_value: { type: "text", analyzer: "standard" },
-                term_name: { type: "text", analyzer: "standard" },
-                description: { type: "text", analyzer: "standard" },
-                source_table: { type: "keyword" },
-                post_type: { type: "keyword" },
-                post_status: { type: "keyword" },
-                post_date: { type: "date" },
-                indexed_at: { type: "date" },
-              },
-            },
+      if (indexExists) {
+        console.log(`Index ${this.indexName} already exists`);
+        return true;
+      }
+
+      await this.client.indices.create({
+        index: this.indexName,
+        body: {
+          mappings: {
+            properties: {
+              table: { type: 'keyword' },
+              id: { type: 'keyword' },
+              title: { type: 'text', analyzer: 'standard' },
+              content: { type: 'text', analyzer: 'standard' },
+              excerpt: { type: 'text', analyzer: 'standard' },
+              meta_value: { type: 'text', analyzer: 'standard' },
+              term_name: { type: 'text', analyzer: 'standard' },
+              description: { type: 'text', analyzer: 'standard' },
+              option_value: { type: 'text', analyzer: 'standard' },
+              created_at: { type: 'date' }
+            }
           },
+          settings: {
+            number_of_shards: 1,
+            number_of_replicas: 0,
+            analysis: {
+              analyzer: {
+                standard: {
+                  type: 'standard'
+                }
+              }
+            }
+          }
+        }
+      });
+
+      console.log(`✅ Created index: ${this.indexName}`);
+      return true;
+    } catch (error) {
+      console.error('Failed to create index:', error.message);
+      throw error;
+    }
+  }
+
+  async indexData(data) {
+    try {
+      const document = {
+        ...data,
+        created_at: new Date().toISOString()
+      };
+
+      await this.client.index({
+        index: this.indexName,
+        id: `${data.table}_${data.id}`,
+        body: document
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Failed to index data:', error.message);
+      throw error;
+    }
+  }
+
+  async searchFromBackup(query, options = {}) {
+    try {
+      const searchParams = {
+        index: this.indexName,
+        body: {
+          query: {
+            multi_match: {
+              query: query,
+              fields: [
+                'title^3',
+                'content^2',
+                'excerpt^2',
+                'meta_value',
+                'term_name^2',
+                'description',
+                'option_value'
+              ],
+              type: 'best_fields',
+              fuzziness: 'AUTO'
+            }
+          },
+          highlight: {
+            fields: {
+              title: {},
+              content: { fragment_size: 150, number_of_fragments: 3 },
+              excerpt: {},
+              meta_value: { fragment_size: 100, number_of_fragments: 2 },
+              term_name: {},
+              description: { fragment_size: 100, number_of_fragments: 2 },
+              option_value: { fragment_size: 100, number_of_fragments: 2 }
+            }
+          },
+          ...options
+        }
+      };
+
+      const response = await this.client.search(searchParams);
+      
+      return {
+        total: response.body.hits.total.value,
+        hits: response.body.hits.hits.map(hit => ({
+          id: hit._id,
+          score: hit._score,
+          table: hit._source.table,
+          source: hit._source,
+          highlight: hit.highlight || {}
+        }))
+      };
+    } catch (error) {
+      console.error('Search failed:', error.message);
+      throw error;
+    }
+  }
+
+  async searchMultipleTables(query, tables, options = {}) {
+    try {
+      const promises = tables.map(table => 
+        this.searchByTable(query, table, options)
+      );
+      
+      const results = await Promise.all(promises);
+      const grouped = {};
+      
+      results.forEach((result, index) => {
+        grouped[tables[index]] = result.hits;
+      });
+      
+      return grouped;
+    } catch (error) {
+      console.error('Multi-table search failed:', error.message);
+      throw error;
+    }
+  }
+
+  async searchByTable(query, tableName, options = {}) {
+    try {
+      const searchParams = {
+        index: this.indexName,
+        body: {
+          query: {
+            bool: {
+              must: [
+                {
+                  term: { table: tableName }
+                },
+                {
+                  multi_match: {
+                    query: query,
+                    fields: [
+                      'title^3',
+                      'content^2',
+                      'excerpt^2',
+                      'meta_value',
+                      'term_name^2',
+                      'description',
+                      'option_value'
+                    ],
+                    type: 'best_fields',
+                    fuzziness: 'AUTO'
+                  }
+                }
+              ]
+            }
+          },
+          highlight: {
+            fields: {
+              title: {},
+              content: { fragment_size: 150, number_of_fragments: 3 },
+              excerpt: {},
+              meta_value: { fragment_size: 100, number_of_fragments: 2 },
+              term_name: {},
+              description: { fragment_size: 100, number_of_fragments: 2 },
+              option_value: { fragment_size: 100, number_of_fragments: 2 }
+            }
+          },
+          ...options
+        }
+      };
+
+      const response = await this.client.search(searchParams);
+      
+      return {
+        total: response.body.hits.total.value,
+        hits: response.body.hits.hits.map(hit => ({
+          id: hit._id,
+          score: hit._score,
+          source: hit._source,
+          highlight: hit.highlight || {}
+        }))
+      };
+    } catch (error) {
+      console.error(`Search in table ${tableName} failed:`, error.message);
+      throw error;
+    }
+  }
+
+  async getAvailableTables() {
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        body: {
+          size: 0,
+          aggs: {
+            tables: {
+              terms: {
+                field: 'table',
+                size: 100
+              }
+            }
+          }
+        }
+      });
+
+      return response.body.aggregations.tables.buckets.map(bucket => ({
+        table: bucket.key,
+        count: bucket.doc_count
+      }));
+    } catch (error) {
+      console.error('Failed to get available tables:', error.message);
+      throw error;
+    }
+  }
+
+  async deleteIndex() {
+    try {
+      const indexExists = await this.client.indices.exists({
+        index: this.indexName
+      });
+
+      if (indexExists) {
+        await this.client.indices.delete({
+          index: this.indexName
         });
-        console.log(`Created index: ${this.backupIndex}`);
+        console.log(`✅ Deleted index: ${this.indexName}`);
+        return true;
+      } else {
+        console.log(`Index ${this.indexName} does not exist`);
+        return false;
       }
     } catch (error) {
-      console.error("Failed to create backup index:", error.message);
+      console.error('Failed to delete index:', error.message);
+      throw error;
+    }
+  }
+
+  async refresh() {
+    try {
+      await this.client.indices.refresh({
+        index: this.indexName
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to refresh index:', error.message);
+      throw error;
+    }
+  }
+
+  async getClusterHealth() {
+    try {
+      const response = await this.client.cluster.health();
+      return response.body;
+    } catch (error) {
+      console.error('Failed to get cluster health:', error.message);
+      throw error;
+    }
+  }
+
+  async getIndexStats() {
+    try {
+      const response = await this.client.indices.stats({
+        index: this.indexName
+      });
+      return response.body;
+    } catch (error) {
+      console.error('Failed to get index stats:', error.message);
       throw error;
     }
   }

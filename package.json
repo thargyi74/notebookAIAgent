@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node src/test.js",
-    "elasticsearch": "node src/elasticsearch-demo.js"
+    "elasticsearch": "node src/elasticsearch-demo.js",
+    "elasticsearch-online": "node test-elasticsearch-online.js"
   },
   "keywords": [
     "ai",

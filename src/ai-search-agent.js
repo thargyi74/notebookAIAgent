@@ -1,12 +1,12 @@
 import WordPressDatabase from './database.js';
-import SearchEngine from './search-engine.js';
+import ElasticsearchSearchEngine from './elasticsearch-search.js';
 import BurmeseTextProcessor from './burmese-utils.js';
 import OpenAIClient from './openai-client.js';
 
 class AISearchAgent {
     constructor(options = {}) {
         this.database = new WordPressDatabase();
-        this.searchEngine = new SearchEngine();
+        this.searchEngine = new ElasticsearchSearchEngine();
         this.textProcessor = new BurmeseTextProcessor();
         this.openai = new OpenAIClient();
         
@@ -42,29 +42,19 @@ class AISearchAgent {
         }
     }
 
-    async buildIndex(maxPosts = null) {
+    async buildIndex() {
         try {
-            console.log('Building search index...');
+            console.log('Building Elasticsearch index...');
             
-            const limit = maxPosts || this.options.maxIndexSize;
-            const posts = await this.database.getAllPosts(limit);
+            const result = await this.searchEngine.initializeBackup();
             
-            if (posts.length === 0) {
-                console.log('No posts found to index');
-                return false;
+            if (result.success) {
+                console.log(`Elasticsearch index built successfully with ${result.totalIndexed} records`);
             }
             
-            const success = await this.searchEngine.indexContent(posts);
-            
-            if (success) {
-                console.log(`Index built successfully with ${posts.length} posts`);
-                const stats = this.searchEngine.getIndexStats();
-                console.log(`Memory usage: ${stats.memoryUsage}`);
-            }
-            
-            return success;
+            return result.success;
         } catch (error) {
-            console.error('Failed to build index:', error.message);
+            console.error('Failed to build Elasticsearch index:', error.message);
             throw error;
         }
     }
@@ -79,12 +69,11 @@ class AISearchAgent {
         }
 
         const searchOptions = {
-            limit: 10,
-            semanticThreshold: this.options.similarityThreshold,
-            enableSemanticSearch: true,
-            enableKeywordSearch: true,
-            enhanceQuery: this.options.enableQueryEnhancement,
-            ...options
+            limit: options.limit || 10,
+            offset: options.offset || 0,
+            tables: options.tables || [],
+            sortBy: options.sortBy || '_score',
+            sortOrder: options.sortOrder || 'desc'
         };
 
         try {
@@ -92,23 +81,23 @@ class AISearchAgent {
             
             const preprocessedQuery = this.textProcessor.normalizeText(query);
             
-            const results = await this.searchEngine.hybridSearch(preprocessedQuery, searchOptions);
+            const results = await this.searchEngine.search(preprocessedQuery, searchOptions);
             
-            if (this.options.enableSummarization && results.length > 0) {
-                for (const result of results) {
-                    if (result.post.post_content && result.post.post_content.length > 300) {
+            if (this.options.enableSummarization && results.tables && results.tables.posts) {
+                for (const result of results.tables.posts.results) {
+                    if (result.data.content && result.data.content.length > 300) {
                         try {
-                            result.summary = await this.openai.summarizeContent(result.post.post_content, 150);
+                            result.summary = await this.openai.summarizeContent(result.data.content, 150);
                         } catch (error) {
-                            console.warn(`Failed to summarize post ${result.post.ID}:`, error.message);
-                            result.summary = this.searchEngine.truncateContent(result.post.post_content, 150);
+                            console.warn(`Failed to summarize post ${result.id}:`, error.message);
+                            result.summary = result.data.content.substring(0, 150) + '...';
                         }
                     }
                 }
             }
 
-            console.log(`Found ${results.length} results`);
-            return this.formatSearchResults(results, query);
+            console.log(`Found results in ${results.total_tables} table(s)`);
+            return results;
             
         } catch (error) {
             console.error('Search failed:', error.message);
@@ -116,31 +105,6 @@ class AISearchAgent {
         }
     }
 
-    formatSearchResults(results, originalQuery) {
-        return {
-            query: originalQuery,
-            totalResults: results.length,
-            timestamp: new Date().toISOString(),
-            results: results.map((result, index) => ({
-                rank: index + 1,
-                id: result.post.ID,
-                title: result.post.post_title,
-                highlightedTitle: result.highlightedTitle,
-                content: result.post.post_content,
-                highlightedContent: result.highlightedContent,
-                summary: result.summary || this.searchEngine.truncateContent(result.post.post_content, 150),
-                excerpt: result.post.post_excerpt,
-                date: result.post.post_date,
-                type: result.post.post_type,
-                url: this.generatePostUrl(result.post),
-                scores: {
-                    combined: parseFloat(result.combinedScore.toFixed(4)),
-                    keyword: parseFloat((result.keywordScore || 0).toFixed(4)),
-                    semantic: parseFloat((result.semanticScore || 0).toFixed(4))
-                }
-            }))
-        };
-    }
 
     generatePostUrl(post) {
         const baseUrl = process.env.WORDPRESS_BASE_URL || 'http://localhost';
@@ -184,17 +148,16 @@ class AISearchAgent {
         }
     }
 
-    getStats() {
+    async getStats() {
         return {
             initialized: this.isInitialized,
-            indexStats: this.searchEngine.getIndexStats(),
+            availableTables: await this.searchEngine.getAvailableTables(),
             options: this.options
         };
     }
 
     async refreshIndex() {
-        console.log('Refreshing search index...');
-        this.searchEngine.clearIndex();
+        console.log('Refreshing Elasticsearch index...');
         return await this.buildIndex();
     }
 
@@ -203,7 +166,6 @@ class AISearchAgent {
             if (this.database) {
                 await this.database.disconnect();
             }
-            this.searchEngine.clearIndex();
             this.isInitialized = false;
             console.log('AI Search Agent cleaned up successfully');
         } catch (error) {
